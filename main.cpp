@@ -9,7 +9,6 @@
 #include<SDL3_ttf/SDL_ttf.h>
 #include<muparser/muParser.h>
 #include<iostream>
-#include<codecvt>
 
 // NAMESPACES
 using namespace std;
@@ -25,6 +24,12 @@ string EXPRESSION="";
 float GRAPH_SCALE=.05;
 float mPosX=0, mPosY=0;
 bool mouse1=false, mouse2=false;
+bool LCTRL_DOWN=false;
+uint64_t lastTime=SDL_GetPerformanceCounter();
+uint64_t fpsTimer=lastTime;
+uint64_t freq=SDL_GetPerformanceFrequency();
+int frames=0;
+int fps=0;
 
 // SDL3
 static SDL_Window* win;
@@ -97,13 +102,13 @@ SDL_AppResult SDL_AppIterate(void* appstate){
 	SDL_RenderClear(rendd);
 	//set blendmode
     SDL_SetRenderDrawBlendMode(rendd, SDL_BLENDMODE_BLEND);
-    //render center point
+    //render center lines
     SDL_SetRenderDrawColor(rendd, 155, 100, 255, 155);
     SDL_RenderLine(rendd, GRAPH_POS.x, 0, GRAPH_POS.x, WINDOW_HEIGHT);
     SDL_RenderLine(rendd, 0, GRAPH_POS.y, WINDOW_WIDTH, GRAPH_POS.y);
-    SDL_SetRenderDrawColor(rendd, 200, 200, 200, 255);
-    //render graph lines
+    //render expression
     float lastX=NAN, lastY=NAN;
+    SDL_SetRenderDrawColor(rendd, 200, 200, 200, 255);
     for (float x=-GRAPH_POS.x; x<WINDOW_WIDTH-GRAPH_POS.x; x++){
         float y=evalExpr(x);
         float newX=x + GRAPH_POS.x;
@@ -118,13 +123,26 @@ SDL_AppResult SDL_AppIterate(void* appstate){
     if (mouse2){
         SDL_SetRenderDrawColor(rendd, 255, 155, 155, SDL_ALPHA_OPAQUE);
         SDL_RenderLine(rendd, mPosX, 0, mPosX, WINDOW_HEIGHT);
-        float localY=evalExpr(mPosX - GRAPH_POS.x) + GRAPH_POS.y;
+        float localX=mPosX - GRAPH_POS.x;
+        float localY=evalExpr(localX) + GRAPH_POS.y;
         if (!isnan(localY)){
             SDL_RenderLine(rendd, 0, localY, WINDOW_WIDTH, localY);
         }
     }
-    //render text
-    drawText(rendd, TEXT_FONT, TEXT_COLOR, BG_COLOR, {0, 0}, EXPRESSION);
+    //render expression text
+    drawText(rendd, TEXT_FONT, TEXT_COLOR, BG_COLOR, {0, 0}, EXPRESSION+(fmod(SDL_GetTicks(), 1000)/500>=1 ? "|" : ""));
+    //calculate and render FPS value
+    frames++;
+    uint64_t now=SDL_GetPerformanceCounter();
+    if ((now-fpsTimer)>=freq){
+        fps=frames;
+        frames=0;
+        fpsTimer=now;
+    }
+    drawText(rendd, TEXT_FONT, TEXT_COLOR, BG_COLOR, {WINDOW_WIDTH, 0}, "FPS: "+to_string(fps), {-1, 0});
+    //render intersection coords
+    if (mouse2) drawText(rendd, TEXT_FONT, TEXT_COLOR, BG_COLOR, SDL_Point{(int)mPosX+24, (int)mPosY}, 
+    "(" + to_string(fmod(mPosX - GRAPH_POS.x, WINDOW_WIDTH)*GRAPH_SCALE) + ", " + to_string(-evalExpr(mPosX - GRAPH_POS.x)*GRAPH_SCALE) + ")");
 	//rendering
 	SDL_RenderPresent(rendd);
 	return SDL_APP_CONTINUE;
@@ -135,12 +153,18 @@ SDL_AppResult SDL_AppEvent(void* appstate, SDL_Event* event){
 	switch (event->type){
 		case SDL_EVENT_QUIT:
 			return SDL_APP_SUCCESS;
+        case SDL_EVENT_KEY_UP:
+            LCTRL_DOWN=false;
+            break;
 		case SDL_EVENT_KEY_DOWN:
             if (event->key.scancode==SDL_SCANCODE_BACKSPACE){
-                if (!EXPRESSION.empty()) EXPRESSION.pop_back();
+                if (!EXPRESSION.empty())
+                    (LCTRL_DOWN==true) ? EXPRESSION.clear() : EXPRESSION.pop_back();
                 parser.SetExpr(EXPRESSION);
                 validateExpr();
-			}
+			}else if (event->key.scancode==SDL_SCANCODE_LCTRL){
+                LCTRL_DOWN=true;
+            }
 			break;
 		case SDL_EVENT_MOUSE_WHEEL:
             GRAPH_SCALE=clamp<float>(GRAPH_SCALE - event->wheel.y*ZOOM_INCREMENT, MIN_ZOOM, MAX_ZOOM);
