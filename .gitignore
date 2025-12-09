@@ -1,2 +1,6 @@
-build
-bin
+build/
+bin/
+include/
+.vscode/
+*.ini
+*.exe
