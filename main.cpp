@@ -4,17 +4,21 @@
 #define MAIN_FONT "fonts/Mono-Regular.ttf"
 
 // INCLUDES
+#include<vector>
+#include<iostream>
+#include<cmath>
+
 #include<SDL3/SDL.h>
 #include<SDL3/SDL_main.h>
 #include<SDL3_ttf/SDL_ttf.h>
 #include<SDL3_image/SDL_image.h>
-#include<muparser/muParser.h>
-#include<iostream>
-#include<windows.h>
-#include<imgui/imgui.h>
-#include<imgui/imgui_impl_sdl3.h>
-#include<imgui/imgui_impl_sdlrenderer3.h>
-#include<imgui/imgui_stdlib.h>
+
+#include<muParser.h>
+
+#include<imgui.h>
+#include<imgui_impl_sdl3.h>
+#include<imgui_impl_sdlrenderer3.h>
+#include<imgui_stdlib.h>
 
 // NAMESPACES
 using namespace std;
@@ -54,6 +58,11 @@ SDL_Color TEXT_COLOR={255, 255, 255, 255};
 SDL_Color BG_COLOR={30, 30, 30, 255};
 TTF_Font* TEXT_FONT;
 
+// SIGN NUMBER
+template <typename T> int sgn(T val) {
+    return (T(0) < val) - (val < T(0));
+}
+
 // GRID SNAPPING
 double snapToGrid(double x, double g=.5){
     return round(x/g)*g;
@@ -85,11 +94,6 @@ double evalExpr(FuncObject &func, double x){
     return -pureEvalExpr(func, x*GRAPH_SCALE)/GRAPH_SCALE;
 }
 
-// C-STRING CONVERSION
-const char* strToC(string a){
-    return (!a.empty() ? a.c_str() : " ");
-}
-
 // ADD NEW FUNCTION
 FuncObject createFunc(string expression, SDL_Color color={200, 200, 200, 255}){
     FuncObject a{};
@@ -105,23 +109,23 @@ FuncObject createFunc(string expression, SDL_Color color={200, 200, 200, 255}){
 }
 
 // TEXT DRAW
-void drawText(SDL_Renderer* rend, TTF_Font* font, SDL_Color textColor, SDL_Color bgColor, SDL_Point pos, string text, SDL_Point offsetInfluence={0, 0}){
-    SDL_Surface *textSurface=TTF_RenderText_Solid(font, strToC(text), 0, textColor);
-    SDL_Texture *textTexture=SDL_CreateTextureFromSurface(rend, textSurface);
-    SDL_FRect textRect = {(int)(pos.x + textSurface->w*offsetInfluence.x), (int)(pos.y + textSurface->h*offsetInfluence.y), textSurface->w, textSurface->h};
-	SDL_SetRenderDrawColor(rend, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
-    SDL_RenderFillRect(rend, &textRect);
-    SDL_RenderTexture(rend, textTexture, NULL, &textRect);
-    SDL_DestroyTexture(textTexture);
-    SDL_DestroySurface(textSurface);
-}
+// void drawText(SDL_Renderer* rend, TTF_Font* font, SDL_Color textColor, SDL_Color bgColor, SDL_Point pos, string text, SDL_Point offsetInfluence={0, 0}){
+//     SDL_Surface *textSurface=TTF_RenderText_Solid(font, strToC(text), 0, textColor);
+//     SDL_Texture *textTexture=SDL_CreateTextureFromSurface(rend, textSurface);
+//     SDL_FRect textRect = {(int)(pos.x + textSurface->w*offsetInfluence.x), (int)(pos.y + textSurface->h*offsetInfluence.y), textSurface->w, textSurface->h};
+// 	SDL_SetRenderDrawColor(rend, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
+//     SDL_RenderFillRect(rend, &textRect);
+//     SDL_RenderTexture(rend, textTexture, NULL, &textRect);
+//     SDL_DestroyTexture(textTexture);
+//     SDL_DestroySurface(textSurface);
+// }
 
 // INITIALIZATION
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]){
 	SDL_Init(SDL_INIT_VIDEO);
 	SDL_Init(SDL_INIT_EVENTS);
 	TTF_Init();
-	SDL_CreateWindowAndRenderer("Graph Renderer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE | SDL_WINDOW_OPENGL, &win, &rendd);
+	SDL_CreateWindowAndRenderer("Graph Renderer", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_RESIZABLE, &win, &rendd);
 	TEXT_FONT=TTF_OpenFont(MAIN_FONT, DEFAULT_FONT_SIZE);
     // SDL_SetRenderVSync(rendd, 1);
 
@@ -130,7 +134,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]){
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    ImGui::StyleColorsDark();
+    ImGui::StyleColorsClassic();
 
     ImGuiStyle& style = ImGui::GetStyle();
     style.ScaleAllSizes(main_scale);
@@ -173,6 +177,9 @@ void do_shit(){
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::Begin("Functions", (bool*)false, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
+    if (ImGui::Button("Reset position"))
+        GRAPH_POS={WINDOW_WIDTH/2, WINDOW_HEIGHT/2};
+    ImGui::SameLine();
     if (ImGui::Button("+"))
         FUNCTIONS_LIST.push_back(createFunc(""));
 
@@ -194,7 +201,7 @@ void do_shit(){
         if (ImGui::ColorButton("##", ImVec4(func.color_4f[0], func.color_4f[1], func.color_4f[2], func.color_4f[3])))
             FOCUSED_FUNCOBJ=(FOCUSED_FUNCOBJ==i ? -1 : i);
         
-        ImGui::Text(to_string(func.color_4f[0]).c_str());
+        // ImGui::Text(to_string(func.color_4f[0]).c_str());
         ImGui::PopID();
 
         if (FOCUSED_FUNCOBJ==i){
@@ -214,7 +221,7 @@ void do_shit(){
             double y=evalExpr(func, x);
             double newX=x + GRAPH_POS.x;
             double newY=y + GRAPH_POS.y;
-            if (!isnan(newY) && !isnan(lastY))
+            if (!isnan(newY) && !isnan(lastY) && !isinf(newY) && !isinf(lastY))
                 SDL_RenderLine(rendd, lastX, lastY, newX, newY);
             lastX=newX;
             lastY=newY;

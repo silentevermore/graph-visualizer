@@ -7,17 +7,15 @@
             "command": "g++",
             "args": [
                 "-Iinclude",
-                "-Lbin",
                 "-lSDL3",
                 "-lSDL3_ttf",
                 "-lSDL3_image",
+                "-limgui",
                 "-lmuparser",
-                "-mwindows",
                 "-g",
-                "include/imgui/*.cpp",
                 "main.cpp",
                 "-o",
-                "build/main.exe"
+                "build/Graph"
             ],
             "options": {
                 "cwd": "${workspaceFolder}"
