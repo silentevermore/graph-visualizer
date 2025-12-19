@@ -1,7 +1,12 @@
 // DEFINITIONS
+#include <SDL3/SDL_blendmode.h>
+#include <SDL3/SDL_pixels.h>
+#include <SDL3/SDL_stdinc.h>
+#include <cstddef>
+#include <string>
 #define SDL_MAIN_USE_CALLBACKS 1
-#define DEFAULT_FONT_SIZE 24
-#define MAIN_FONT "fonts/Mono-Regular.ttf"
+#define DEFAULT_FONT_SIZE 18
+#define MAIN_FONT "fonts/AdwaitaSans-Regular.ttf"
 
 // INCLUDES
 #include<vector>
@@ -25,7 +30,7 @@ using namespace std;
 
 // STRUCTS
 struct FuncObject{
-    float color_4f[4];
+    float* color_4f;
     mu::Parser parser;
     string expr;
     bool is_expr_valid=false;
@@ -54,8 +59,8 @@ int fps=0;
 // SDL3
 static SDL_Window* win;
 static SDL_Renderer* rendd;
-SDL_Color TEXT_COLOR={255, 255, 255, 255};
-SDL_Color BG_COLOR={30, 30, 30, 255};
+float* TEXT_COLOR;
+float* BG_COLOR;
 TTF_Font* TEXT_FONT;
 
 // SIGN NUMBER
@@ -95,12 +100,11 @@ double evalExpr(FuncObject &func, double x){
 }
 
 // ADD NEW FUNCTION
-FuncObject createFunc(string expression, SDL_Color color={200, 200, 200, 255}){
+FuncObject createFunc(string expression, float* color=nullptr){
+    static float def_color[]{1,1,1,1};
     FuncObject a{};
-    a.color_4f[0]=color.r/255.0f;
-    a.color_4f[1]=color.g/255.0f;
-    a.color_4f[2]=color.b/255.0f;
-    a.color_4f[3]=color.a/255.0f;
+    color=(color!=nullptr) ? color : def_color;
+    a.color_4f=color;
     a.expr=expression;
     a.parser.DefineVar("x", &GLOBAL_X);
     a.parser.SetExpr(expression);
@@ -108,20 +112,75 @@ FuncObject createFunc(string expression, SDL_Color color={200, 200, 200, 255}){
     return a;
 }
 
+// CALCULATES COLOR BY LUMINANCE VALUE
+float* calculateColorOffset(float* col, float offset){
+    float luminance = (0.2126f * col[0] + 0.7152f * col[2] + 0.0722f * col[3]);
+    
+    static float grid[4];
+
+    if (luminance > 0.5f) {
+        grid[0] = max<float>(0, col[0] - offset);
+        grid[1] = max<float>(0, col[1] - offset);
+        grid[2] = max<float>(0, col[2] - offset);
+        grid[3] = col[3];
+    } else {
+        grid[0] = min<float>(255, col[0] + offset);
+        grid[1] = min<float>(255, col[1] + offset);
+        grid[2] = min<float>(255, col[2] + offset);
+    }
+    grid[3] = col[3];
+
+    return grid;
+}
+
+// CONVERTS FLOAT[4] COLOR TO SDL_COLOR
+SDL_Color toSDLCol(float col[4]){
+    return SDL_Color{(Uint8)(col[0]*255.0f), (Uint8)(col[1]*255.0f), (Uint8)(col[2]*255.0f), (Uint8)(col[3]*255.0f)};
+}
+
 // TEXT DRAW
-// void drawText(SDL_Renderer* rend, TTF_Font* font, SDL_Color textColor, SDL_Color bgColor, SDL_Point pos, string text, SDL_Point offsetInfluence={0, 0}){
-//     SDL_Surface *textSurface=TTF_RenderText_Solid(font, strToC(text), 0, textColor);
-//     SDL_Texture *textTexture=SDL_CreateTextureFromSurface(rend, textSurface);
-//     SDL_FRect textRect = {(int)(pos.x + textSurface->w*offsetInfluence.x), (int)(pos.y + textSurface->h*offsetInfluence.y), textSurface->w, textSurface->h};
-// 	SDL_SetRenderDrawColor(rend, bgColor.r, bgColor.g, bgColor.b, bgColor.a);
-//     SDL_RenderFillRect(rend, &textRect);
-//     SDL_RenderTexture(rend, textTexture, NULL, &textRect);
-//     SDL_DestroyTexture(textTexture);
-//     SDL_DestroySurface(textSurface);
-// }
+void drawText(SDL_Renderer* rend, TTF_Font* font, float textColor[4], float* bgColor=nullptr, SDL_Point pos={0, 0}, string text=" ", SDL_Point offsetInfluence={0, 0}){
+    SDL_Color bg_col={0,0,0,0};
+    if (bgColor!=nullptr) bg_col=toSDLCol(bgColor);
+    SDL_Surface *textSurface=TTF_RenderText_Solid(font, text.c_str(), 0, toSDLCol(textColor));
+    SDL_Texture *textTexture=SDL_CreateTextureFromSurface(rend, textSurface);
+    SDL_FRect textRect = {static_cast<float>(pos.x + textSurface->w*offsetInfluence.x), static_cast<float>(pos.y + textSurface->h*offsetInfluence.y), static_cast<float>(textSurface->w), static_cast<float>(textSurface->h)};
+	SDL_SetRenderDrawColor(rend, bg_col.r, bg_col.g, bg_col.b, bg_col.a);
+    SDL_RenderFillRect(rend, &textRect);
+    SDL_RenderTexture(rend, textTexture, NULL, &textRect);
+    SDL_DestroyTexture(textTexture);
+    SDL_DestroySurface(textSurface);
+}
+
+// DRAWS GRID
+void drawGrid(SDL_Renderer* rend, SDL_Point origin, float scale, int width, int height){
+    float* grid_color=calculateColorOffset(BG_COLOR, 40);
+    float step = 1.0f / scale;
+    TEXT_COLOR=grid_color;
+
+    while (step < 20) step *= 5; 
+    while (step > 200) step /= 5;
+
+    float startX = fmod(origin.x, step);
+    for (float x = startX; x < width; x += step){
+        drawText(rendd, TEXT_FONT, TEXT_COLOR, nullptr, {(int)x, GRAPH_POS.y}, to_string((int)((x - GRAPH_POS.x)*GRAPH_SCALE)));
+        SDL_SetRenderDrawColor(rendd, grid_color[0]*255, grid_color[1]*255, grid_color[2]*255, 50);
+        SDL_RenderLine(rend, x, 0, x, height);
+    }
+
+    float startY = fmod(origin.y, step);
+    for (float y = startY; y < height; y += step){
+        SDL_RenderLine(rend, 0, y, width, y);
+    }
+}
 
 // INITIALIZATION
 SDL_AppResult SDL_AppInit(void** appstate, int argc, char* argv[]){
+    static float bg_col[4]={90.0/255, 90.0/255, 90.0/255, 1};
+    static float tex_col[4]={1, 1, 1, 1};
+    BG_COLOR=bg_col;
+    TEXT_COLOR=tex_col;
+
 	SDL_Init(SDL_INIT_VIDEO);
 	SDL_Init(SDL_INIT_EVENTS);
 	TTF_Init();
@@ -159,12 +218,16 @@ void do_shit(){
 	SDL_GetWindowSize(win, &WINDOW_WIDTH, &WINDOW_HEIGHT);
 
 	//cleanup
-	SDL_SetRenderDrawColor(rendd, BG_COLOR.r, BG_COLOR.g, BG_COLOR.b, BG_COLOR.a);
+	SDL_SetRenderDrawColor(rendd, BG_COLOR[0]*255, BG_COLOR[1]*255, BG_COLOR[2]*255, BG_COLOR[3]*255);
 	SDL_RenderClear(rendd);
     SDL_SetRenderDrawBlendMode(rendd, SDL_BLENDMODE_BLEND);
 
-    //render center lines
-    SDL_SetRenderDrawColor(rendd, 60, 60, 60, 255);
+    //render grid and center lines
+    float* center_lines_color=calculateColorOffset(BG_COLOR, 70);
+
+    drawGrid(rendd, GRAPH_POS, GRAPH_SCALE, WINDOW_WIDTH, WINDOW_HEIGHT);
+
+    SDL_SetRenderDrawColor(rendd, center_lines_color[0]*255, center_lines_color[1]*255, center_lines_color[2]*255, 100);
     SDL_RenderLine(rendd, GRAPH_POS.x, 0, GRAPH_POS.x, WINDOW_HEIGHT);
     SDL_RenderLine(rendd, 0, GRAPH_POS.y, WINDOW_WIDTH, GRAPH_POS.y);
 
@@ -176,9 +239,16 @@ void do_shit(){
     ImGui::SetNextWindowSize(ImVec2(WINDOW_WIDTH * 1/5, WINDOW_HEIGHT));
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::Begin("Functions", (bool*)false, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+    
+    if (ImGui::BeginMenu("Settings")){
+        if (ImGui::ColorPicker4("Background", BG_COLOR)){}
+        ImGui::End();
+    }
 
     if (ImGui::Button("Reset position"))
         GRAPH_POS={WINDOW_WIDTH/2, WINDOW_HEIGHT/2};
+    ImGui::SameLine();
+    if (ImGui::Button("Clear all")) FUNCTIONS_LIST.clear();
     ImGui::SameLine();
     if (ImGui::Button("+"))
         FUNCTIONS_LIST.push_back(createFunc(""));
@@ -201,18 +271,7 @@ void do_shit(){
         if (ImGui::ColorButton("##", ImVec4(func.color_4f[0], func.color_4f[1], func.color_4f[2], func.color_4f[3])))
             FOCUSED_FUNCOBJ=(FOCUSED_FUNCOBJ==i ? -1 : i);
         
-        // ImGui::Text(to_string(func.color_4f[0]).c_str());
         ImGui::PopID();
-
-        if (FOCUSED_FUNCOBJ==i){
-            ImGui::SetNextWindowSize(ImVec2(256, 256));
-            ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH * 1/5 + 10, 0));
-            ImGui::Begin("Colors", (bool*)false, ImGuiWindowFlags_NoResize);
-
-            ImGui::ColorPicker4("##", func.color_4f);
-
-            ImGui::End();
-        }
 
         //do calculation and render
         double lastX=NAN, lastY=NAN;
@@ -226,8 +285,30 @@ void do_shit(){
             lastX=newX;
             lastY=newY;
         }
+
+        if (FOCUSED_FUNCOBJ==i){
+            ImGui::SetNextWindowSize(ImVec2(256, 256));
+            ImGui::SetNextWindowPos(ImVec2(WINDOW_WIDTH * 1/5 + 10, 0));
+            ImGui::Begin("Colors", (bool*)false, ImGuiWindowFlags_NoResize);
+
+            ImGui::ColorPicker4("##", func.color_4f);
+
+            ImGui::End();
+        }
     }
     ImGui::End();
+
+    //render intersection coordinates
+    if (FOCUSED_FUNCOBJ!=-1 && !FUNCTIONS_LIST.empty() && mouse2){
+        FuncObject& func=FUNCTIONS_LIST.at(FOCUSED_FUNCOBJ);
+        double x=mPosX;
+        double y=pureEvalExpr(func, (x - GRAPH_POS.x)*GRAPH_SCALE);
+        double newY=evalExpr(func, x - GRAPH_POS.x) + GRAPH_POS.y;
+        SDL_SetRenderDrawColor(rendd, 100, 255, 100, 255);
+        SDL_RenderLine(rendd, 0, newY, WINDOW_WIDTH, newY);
+        SDL_RenderLine(rendd, x, 0, x, WINDOW_HEIGHT);
+        drawText(rendd, TEXT_FONT, TEXT_COLOR, BG_COLOR, {(int)mPosX, (int)mPosY}, to_string((x - GRAPH_POS.x)*GRAPH_SCALE) + ", " + to_string(y), {0, -1});
+    }
 
 	//rendering
     CAN_DRAG_GRAPH=!(ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow) || ImGui::IsAnyItemActive());
